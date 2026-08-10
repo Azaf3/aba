@@ -468,6 +468,8 @@
   .tipo-card-lock{display:none;font-size:.76rem;font-weight:700;color:#8F3A3A;margin-top:2px;}
   .tipo-card.locked{opacity:.5;cursor:not-allowed;pointer-events:none;background:var(--cream-2);}
   .tipo-card.locked .tipo-card-lock{display:block;}
+  .incentivo-cadastro{display:flex;align-items:flex-start;gap:10px;background:linear-gradient(135deg, #FCF2DA, #F5E3B8);border:1.5px solid var(--wheat);border-radius:14px;padding:12px 14px;margin-bottom:18px;font-size:.85rem;line-height:1.5;color:var(--green-900);}
+  .incentivo-cadastro svg{width:20px;height:20px;flex-shrink:0;color:var(--wheat-dark);margin-top:1px;}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -499,6 +501,12 @@
   <!-- CADASTRO -->
   <section class="card" id="card-cadastro">
     <div id="cadastro-form">
+      <div class="incentivo-cadastro">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+        <div>
+          <strong>Falta pouco!</strong> Preencha seus dados uma vez e desbloqueie os pedidos, cestas prontas ou compra sob demanda, em poucos segundos.
+        </div>
+      </div>
       <div class="form-head">
         <div class="form-head-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
