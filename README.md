@@ -2,7 +2,7 @@
 
 Site para pedido online das cestas básicas da **Aba Cestas Básicas** (Brasília/DF), com cadastro de cliente, seleção de cestas por tamanho e envio do pedido formatado direto pro WhatsApp.
 
-🔗 **Site no ar:** https://azaf3.github.io/site-aba/
+🔗 **Site no ar:** https://azaf3.github.io/aba/
 
 ---
 
