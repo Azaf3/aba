@@ -798,6 +798,7 @@
    CONFIGURAÇÃO — edite aqui preços e o número de WhatsApp
    ========================================================= */
 const WHATSAPP_NUMERO = "5561986239797"; // formato: 55 + DDD + número
+const PEDIDO_MINIMO = 5; // quantidade mínima de cestas (somando todos os tamanhos) por pedido
 const CESTAS = [
   {
     id: "P", nome: "Cesta Básica P", preco: 65.90,
@@ -849,9 +850,9 @@ const FRETE_CONFIG = {
   // Forma fácil de pegar: busque o endereço no Google Maps, clique com o
   // botão direito no pino exato e copie os dois números que aparecem.
   sede: {
-    endereco: "SH Ponte de Terra, Gama, Brasília/DF, 72426-010",
-    lat: -15.9608,
-    lng: -48.0272,
+    endereco: "Quadra 01, Lote 111, Setor Oeste, Gama/DF, 72425-010",
+    lat: -16.0086842,
+    lng: -48.072216,
   },
 
   consumoKmPorLitro: 10,        // consumo médio do veículo
@@ -1390,9 +1391,14 @@ function updateSummary(){
     totalValor += state.qty[c.id] * c.preco;
   });
 
-  els.summaryCount.textContent = totalQty === 0
-    ? "0 cestas selecionadas"
-    : `${totalQty} cesta${totalQty>1?"s":""} selecionada${totalQty>1?"s":""}`;
+  if(totalQty === 0){
+    els.summaryCount.textContent = "0 cestas selecionadas";
+  } else if(totalQty < PEDIDO_MINIMO){
+    const faltam = PEDIDO_MINIMO - totalQty;
+    els.summaryCount.textContent = `${totalQty} cesta${totalQty>1?"s":""} selecionada${totalQty>1?"s":""} · faltam ${faltam} para o pedido mínimo (${PEDIDO_MINIMO})`;
+  } else {
+    els.summaryCount.textContent = `${totalQty} cesta${totalQty>1?"s":""} selecionada${totalQty>1?"s":""}`;
+  }
 
   const freteEl = document.getElementById("summary-frete");
   let totalComFrete = totalValor;
@@ -1416,6 +1422,12 @@ els.btnEnviar.addEventListener("click", ()=>{
 
   const itens = CESTAS.filter(c => state.qty[c.id] > 0);
   if(itens.length === 0){ showToast("Escolha ao menos uma cesta."); return; }
+
+  const totalQty = CESTAS.reduce((soma, c) => soma + state.qty[c.id], 0);
+  if(totalQty < PEDIDO_MINIMO){
+    showToast(`Pedido mínimo de ${PEDIDO_MINIMO} cestas. Faltam ${PEDIDO_MINIMO - totalQty}.`);
+    return;
+  }
 
   abrirRevisaoPedido(c, itens);
 });
