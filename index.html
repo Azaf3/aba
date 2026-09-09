@@ -1146,63 +1146,62 @@ async function buscarCepECalcularFrete(cepDigitado){
 
   let dadosCep = null;
   let lat = null, lng = null;
+  let coordBrasilApi = null; // guardada só como último recurso — ver comentário abaixo
 
-  // 1ª tentativa: BrasilAPI (v2) — muitas vezes já devolve a coordenada
-  // do CEP direto, sem precisar de geocodificação separada.
+  // 1ª tentativa: ViaCEP, pra descobrir rua/bairro/cidade (não retorna coordenadas).
   try{
-    const respBrasilApi = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
-    if(respBrasilApi.ok){
-      const dadosBrasilApi = await respBrasilApi.json();
-      dadosCep = {
-        logradouro: dadosBrasilApi.street,
-        bairro: dadosBrasilApi.neighborhood,
-        localidade: dadosBrasilApi.city,
-        uf: dadosBrasilApi.state,
-      };
-      const coords = dadosBrasilApi.location && dadosBrasilApi.location.coordinates;
-      if(coords && coords.latitude && coords.longitude){
-        const latBA = parseFloat(coords.latitude);
-        const lngBA = parseFloat(coords.longitude);
-        const dentroDoBrasilBA = latBA <= 5.5 && latBA >= -34 && lngBA <= -34 && lngBA >= -74;
-        if(dentroDoBrasilBA){
-          lat = latBA;
-          lng = lngBA;
-        }
-      }
+    const respCep = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+    if(respCep.ok){
+      const json = await respCep.json();
+      if(!json.erro) dadosCep = json;
     } else {
-      console.warn("[frete] BrasilAPI respondeu com status", respBrasilApi.status, "— tentando ViaCEP.");
+      console.warn("[frete] ViaCEP respondeu com status", respCep.status, "— tentando BrasilAPI.");
     }
   } catch(erro){
-    console.warn("[frete] BrasilAPI indisponível (provável CORS/rede), tentando ViaCEP:", erro);
+    console.warn("[frete] ViaCEP indisponível (provável CORS/rede), tentando BrasilAPI:", erro);
   }
 
   if(meuToken !== ceptoken) return;
 
-  // 2ª tentativa (endereço): se a BrasilAPI não respondeu, usa o ViaCEP
-  // só pra descobrir rua/bairro/cidade — ele não retorna coordenadas.
+  // 2ª tentativa: BrasilAPI (v2) — se o ViaCEP não respondeu, usa ela só pra
+  // descobrir rua/bairro/cidade. A coordenada que ela devolve junto é
+  // guardada à parte (coordBrasilApi) e só usada como último recurso lá
+  // embaixo: pra muitos CEPs ela é só um centroide aproximado da região,
+  // e já gerou frete de área rural pra endereço perto da sede (Ponte Alta
+  // Norte, Gama, deu ~30km na BrasilAPI vs ~7,5km reais pelo endereço).
   if(!dadosCep){
     try{
-      const respCep = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      if(!respCep.ok){
-        console.error("[frete] ViaCEP respondeu com status", respCep.status);
-        if(meuToken === ceptoken) setFreteStatus("indisponivel");
-        return;
+      const respBrasilApi = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
+      if(respBrasilApi.ok){
+        const dadosBrasilApi = await respBrasilApi.json();
+        dadosCep = {
+          logradouro: dadosBrasilApi.street,
+          bairro: dadosBrasilApi.neighborhood,
+          localidade: dadosBrasilApi.city,
+          uf: dadosBrasilApi.state,
+        };
+        const coords = dadosBrasilApi.location && dadosBrasilApi.location.coordinates;
+        if(coords && coords.latitude && coords.longitude){
+          const latBA = parseFloat(coords.latitude);
+          const lngBA = parseFloat(coords.longitude);
+          const dentroDoBrasilBA = latBA <= 5.5 && latBA >= -34 && lngBA <= -34 && lngBA >= -74;
+          if(dentroDoBrasilBA) coordBrasilApi = { lat: latBA, lng: lngBA };
+        }
+      } else {
+        console.error("[frete] BrasilAPI respondeu com status", respBrasilApi.status);
       }
-      const json = await respCep.json();
-      if(json.erro){
-        console.warn("[frete] CEP não encontrado (ViaCEP):", cepLimpo);
-        setFreteStatus("indisponivel");
-        return;
-      }
-      dadosCep = json;
     } catch(erro){
-      console.error("[frete] Falha ao consultar ViaCEP (provável CORS/rede):", erro);
-      if(meuToken === ceptoken) setFreteStatus("indisponivel");
-      return;
+      console.error("[frete] Falha ao consultar BrasilAPI (provável CORS/rede):", erro);
     }
   }
 
   if(meuToken !== ceptoken) return;
+
+  if(!dadosCep){
+    console.warn("[frete] CEP não encontrado em nenhum serviço:", cepLimpo);
+    setFreteStatus("indisponivel");
+    return;
+  }
 
   // preenche endereço/bairro automaticamente se o cliente ainda não tiver digitado
   const campoEndereco = document.getElementById("f-endereco");
@@ -1214,45 +1213,51 @@ async function buscarCepECalcularFrete(cepDigitado){
     campoBairro.value = dadosCep.bairro;
   }
 
-  // Se ainda não temos coordenada (BrasilAPI não trouxe), geocodifica
-  // pelo Nominatim: primeiro pelo CEP puro, depois pelo endereço por extenso.
-  if(lat == null || lng == null){
-    const tentativas = [
-      `${dadosCep.logradouro || ""}, ${dadosCep.bairro || ""}, ${dadosCep.localidade} - ${dadosCep.uf}, Brasil`,
-      `${dadosCep.bairro || ""}, ${dadosCep.localidade} - ${dadosCep.uf}, Brasil`,
-      `${dadosCep.localidade} - ${dadosCep.uf}, Brasil`, // último recurso: pelo menos a cidade (alguns CEPs institucionais vêm sem rua/bairro)
-    ].filter((v, i, arr) => v.replace(/^[, ]+/,"").trim() !== "" && arr.indexOf(v) === i); // remove vazios e duplicatas
+  // Geocodifica o endereço por extenso via Nominatim — muito mais preciso
+  // que o centroide da BrasilAPI, que é a fonte de coordenada só entra
+  // como último recurso, depois deste bloco.
+  const tentativas = [
+    `${dadosCep.logradouro || ""}, ${dadosCep.bairro || ""}, ${dadosCep.localidade} - ${dadosCep.uf}, Brasil`,
+    `${dadosCep.bairro || ""}, ${dadosCep.localidade} - ${dadosCep.uf}, Brasil`,
+    `${dadosCep.localidade} - ${dadosCep.uf}, Brasil`, // último recurso: pelo menos a cidade (alguns CEPs institucionais vêm sem rua/bairro)
+  ].filter((v, i, arr) => v.replace(/^[, ]+/,"").trim() !== "" && arr.indexOf(v) === i); // remove vazios e duplicatas
 
-    for(const consulta of tentativas){
-      try{
-        const urlGeo = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(consulta)}`;
-        const respGeo = await fetch(urlGeo);
-        if(!respGeo.ok){
-          console.error("[frete] Nominatim respondeu com status", respGeo.status, "pra consulta:", consulta);
-          continue;
-        }
-        const resultado = await respGeo.json();
-        if(resultado && resultado.length > 0){
-          const latEncontrada = parseFloat(resultado[0].lat);
-          const lngEncontrada = parseFloat(resultado[0].lon);
-          // trava de sanidade: descarta resultado se cair fora do território brasileiro
-          // (evita "casar" com um lugar errado do outro lado do mundo por coincidência de nome)
-          const dentroDoBrasil = latEncontrada <= 5.5 && latEncontrada >= -34 && lngEncontrada <= -34 && lngEncontrada >= -74;
-          if(dentroDoBrasil){
-            lat = latEncontrada;
-            lng = lngEncontrada;
-            break;
-          } else {
-            console.warn("[frete] Resultado geocodificado fora do Brasil, ignorando:", consulta, latEncontrada, lngEncontrada);
-          }
-        }
-      } catch(erro){
-        console.error("[frete] Falha ao consultar Nominatim (provável CORS/rede):", erro);
+  for(const consulta of tentativas){
+    try{
+      const urlGeo = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(consulta)}`;
+      const respGeo = await fetch(urlGeo);
+      if(!respGeo.ok){
+        console.error("[frete] Nominatim respondeu com status", respGeo.status, "pra consulta:", consulta);
+        continue;
       }
+      const resultado = await respGeo.json();
+      if(resultado && resultado.length > 0){
+        const latEncontrada = parseFloat(resultado[0].lat);
+        const lngEncontrada = parseFloat(resultado[0].lon);
+        // trava de sanidade: descarta resultado se cair fora do território brasileiro
+        // (evita "casar" com um lugar errado do outro lado do mundo por coincidência de nome)
+        const dentroDoBrasil = latEncontrada <= 5.5 && latEncontrada >= -34 && lngEncontrada <= -34 && lngEncontrada >= -74;
+        if(dentroDoBrasil){
+          lat = latEncontrada;
+          lng = lngEncontrada;
+          break;
+        } else {
+          console.warn("[frete] Resultado geocodificado fora do Brasil, ignorando:", consulta, latEncontrada, lngEncontrada);
+        }
+      }
+    } catch(erro){
+      console.error("[frete] Falha ao consultar Nominatim (provável CORS/rede):", erro);
     }
   }
 
   if(meuToken !== ceptoken) return;
+
+  // último recurso: se o Nominatim não achou nada, usa a coordenada bruta
+  // da BrasilAPI (imprecisa, mas melhor que não calcular frete algum).
+  if((lat == null || lng == null) && coordBrasilApi){
+    lat = coordBrasilApi.lat;
+    lng = coordBrasilApi.lng;
+  }
 
   if(lat == null || lng == null){
     console.warn("[frete] Não foi possível localizar coordenadas pro CEP", cepLimpo);
